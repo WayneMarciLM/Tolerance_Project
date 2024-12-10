@@ -3,6 +3,11 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+import warnings
+warnings.filterwarnings('ignore')
 
 def advanced_office_utilization_analysis(badge_df):
     """
@@ -14,105 +19,119 @@ def advanced_office_utilization_analysis(badge_df):
     Returns:
         dict: Comprehensive analysis results
     """
-    # 1. Daily Utilization by Organizational Dimensions
-    def calculate_utilization_metrics(group):
-        return pd.Series({
-            'unique_employees': group['EMPLOYEE_NUMBER'].nunique(),
-            'total_badge_entries': len(group),
-            'avg_daily_utilization': group['EMPLOYEE_NUMBER'].nunique() / len(group.index.get_level_values(0).unique()),
-            'badge_frequency': group['EMPLOYEE_NUMBER'].value_counts().mean()
-        })
+    # Ensure correct date parsing
+    badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    badge_df['HIRE_DATE'] = pd.to_datetime(badge_df['HIRE_DATE'])
     
-    # Organizational Utilization Analysis
-    org_utilization = {}
+    # 1. Daily Utilization by Organizational Dimensions
     org_levels = ['LEVEL_1', 'LEVEL_2', 'LEVEL_3', 'LEVEL_4', 
                   'JOB_FAMILY', 'SEGMENT_DESCRIPTION', 'MANAGEMENT_LEVEL']
     
+    org_utilization = {}
     for level in org_levels:
-        org_utilization[level] = (
-            badge_df.groupby([level, 'DATE'])['EMPLOYEE_NUMBER']
-            .nunique()
-            .groupby(level)
-            .agg(['mean', 'max', 'min'])
-            .rename(columns={'mean': 'avg_daily_employees', 'max': 'peak_employees', 'min': 'min_employees'})
-        )
+        try:
+            org_utilization[level] = (
+                badge_df.groupby([level, 'DATE'])['EMPLOYEE_NUMBER']
+                .nunique()
+                .groupby(level)
+                .agg(['mean', 'max', 'min'])
+                .rename(columns={'mean': 'avg_daily_employees', 'max': 'peak_employees', 'min': 'min_employees'})
+            )
+        except Exception as e:
+            print(f"Error analyzing {level}: {e}")
     
-    # 2. Compliance with Home Allocation Analysis
+    # 2. Allocation Compliance Analysis
     def allocation_compliance_analysis(df):
-        # Calculate badge frequency per employee
-        employee_badge_freq = df.groupby('EMPLOYEE_NUMBER')['DATE'].count()
-        
-        # Link with home allocation percentage
-        allocation_compliance = pd.DataFrame({
-            'badge_frequency': employee_badge_freq,
-            'home_allocation_percent': df.groupby('EMPLOYEE_NUMBER')['HOME_ALLOCATION_PERCENT'].first()
-        })
-        
-        # Calculate correlation and compliance score
-        allocation_compliance['expected_badge_days'] = allocation_compliance['home_allocation_percent'] * 100
-        allocation_compliance['compliance_score'] = np.abs(allocation_compliance['badge_frequency'] - allocation_compliance['expected_badge_days'])
-        
-        return {
-            'overall_compliance_correlation': allocation_compliance['badge_frequency'].corr(allocation_compliance['home_allocation_percent']),
-            'compliance_distribution': allocation_compliance['compliance_score'].describe(),
-            'detailed_compliance_analysis': allocation_compliance
-        }
+        try:
+            # Calculate badge frequency per employee
+            employee_badge_freq = df.groupby('EMPLOYEE_NUMBER')['DATE'].count()
+            
+            # Link with home allocation percentage
+            allocation_compliance = pd.DataFrame({
+                'badge_frequency': employee_badge_freq,
+                'home_allocation_percent': df.groupby('EMPLOYEE_NUMBER')['HOME_ALLOCATION_PERCENT'].first()
+            })
+            
+            # Calculate correlation and compliance score
+            allocation_compliance['expected_badge_days'] = allocation_compliance['home_allocation_percent'] * 100
+            allocation_compliance['compliance_score'] = np.abs(allocation_compliance['badge_frequency'] - allocation_compliance['expected_badge_days'])
+            
+            return {
+                'overall_compliance_correlation': allocation_compliance['badge_frequency'].corr(allocation_compliance['home_allocation_percent']),
+                'compliance_distribution': allocation_compliance['compliance_score'].describe(),
+                'detailed_compliance_analysis': allocation_compliance
+            }
+        except Exception as e:
+            print(f"Error in allocation compliance analysis: {e}")
+            return {}
     
-    # 3. Time-Based Utilization Patterns
+    # 3. Temporal Utilization Analysis
     def temporal_utilization_analysis(df):
-        # Day of week analysis
-        df['day_of_week'] = pd.to_datetime(df['DATE']).dt.day_name()
-        day_of_week_utilization = (
-            df.groupby('day_of_week')['EMPLOYEE_NUMBER']
-            .nunique()
-            .reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
-        )
-        
-        # Time since hire analysis
-        df['days_since_hire'] = (pd.to_datetime(df['DATE']) - pd.to_datetime(df['HIRE_DATE'])).dt.days
-        hire_period_utilization = df.groupby(pd.cut(df['days_since_hire'], 
-            bins=[0, 90, 180, 365, np.inf], 
-            labels=['0-3 months', '3-6 months', '6-12 months', '1+ years']
-        ))['EMPLOYEE_NUMBER'].nunique()
-        
-        return {
-            'day_of_week_utilization': day_of_week_utilization,
-            'hire_period_utilization': hire_period_utilization
-        }
+        try:
+            # Day of week analysis
+            df['day_of_week'] = df['DATE'].dt.day_name()
+            day_of_week_utilization = (
+                df.groupby('day_of_week')['EMPLOYEE_NUMBER']
+                .nunique()
+                .reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
+            )
+            
+            # Time since hire analysis
+            df['days_since_hire'] = (df['DATE'] - df['HIRE_DATE']).dt.days
+            hire_period_utilization = df.groupby(pd.cut(df['days_since_hire'], 
+                bins=[0, 90, 180, 365, np.inf], 
+                labels=['0-3 months', '3-6 months', '6-12 months', '1+ years']
+            ))['EMPLOYEE_NUMBER'].nunique()
+            
+            return {
+                'day_of_week_utilization': day_of_week_utilization,
+                'hire_period_utilization': hire_period_utilization
+            }
+        except Exception as e:
+            print(f"Error in temporal utilization analysis: {e}")
+            return {}
     
     # 4. Predictive Utilization Modeling
     def predictive_utilization_model(df):
-        # Prepare features for predictive analysis
-        feature_columns = [
-            'HOME_ALLOCATION_PERCENT', 'GRADE_EQUIVALENT', 
-            'CURRENT_DAYS_OF_PLACEMENT', 'MANAGEMENT_LEVEL'
-        ]
-        
-        # One-hot encode categorical variables
-        encoded_df = pd.get_dummies(df[feature_columns + ['EMPLOYEE_NUMBER']])
-        
-        # Create target variable (badge frequency)
-        badge_frequency = df.groupby('EMPLOYEE_NUMBER')['DATE'].count()
-        
-        # Prepare features and target
-        X = encoded_df.groupby('EMPLOYEE_NUMBER').mean()
-        y = badge_frequency
-        
-        # Simple linear regression
-        from sklearn.model_selection import train_test_split
-        from sklearn.linear_model import LinearRegression
-        from sklearn.metrics import mean_squared_error, r2_score
-        
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        
-        model = LinearRegression()
-        model.fit(X_train, y_train)
-        
-        return {
-            'model_r2_score': r2_score(y_test, model.predict(X_test)),
-            'model_mse': mean_squared_error(y_test, model.predict(X_test)),
-            'feature_importances': dict(zip(X.columns, model.coef_))
-        }
+        try:
+            # Prepare features for predictive analysis
+            feature_columns = [
+                'HOME_ALLOCATION_PERCENT', 'GRADE_EQUIVALENT', 
+                'CURRENT_DAYS_OF_PLACEMENT'
+            ]
+            
+            # Aggregate features and badge frequency by employee
+            employee_features = df.groupby('EMPLOYEE_NUMBER').agg({
+                'HOME_ALLOCATION_PERCENT': 'first',
+                'GRADE_EQUIVALENT': 'first',
+                'CURRENT_DAYS_OF_PLACEMENT': 'first',
+                'DATE': 'count'
+            }).rename(columns={'DATE': 'badge_frequency'})
+            
+            # One-hot encode management level
+            management_dummies = pd.get_dummies(df.groupby('EMPLOYEE_NUMBER')['MANAGEMENT_LEVEL'].first(), prefix='mgmt')
+            
+            # Combine features
+            X = pd.concat([
+                employee_features[feature_columns], 
+                management_dummies
+            ], axis=1)
+            y = employee_features['badge_frequency']
+            
+            # Split and model
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+            
+            return {
+                'model_r2_score': r2_score(y_test, model.predict(X_test)),
+                'model_mse': mean_squared_error(y_test, model.predict(X_test)),
+                'feature_importances': dict(zip(X.columns, model.coef_))
+            }
+        except Exception as e:
+            print(f"Error in predictive utilization model: {e}")
+            return {}
     
     # Combine all analyses
     analysis_results = {
@@ -136,43 +155,55 @@ def visualize_advanced_analysis(results):
     # 1. Organizational Utilization Heatmap
     plt.subplot(2, 2, 1)
     org_levels = list(results['organizational_utilization'].keys())
+    
+    # Prepare data for heatmap
     utilization_matrix = pd.DataFrame({
         level: results['organizational_utilization'][level]['avg_daily_employees'] 
         for level in org_levels
     })
-    sns.heatmap(utilization_matrix, cmap='YlGnBu', annot=True, fmt='.2f')
-    plt.title('Organizational Utilization Heatmap')
-    plt.xlabel('Organizational Levels')
-    plt.ylabel('Avg Daily Employees')
-    plt.xticks(rotation=45, ha='right')
+    
+    # Ensure the matrix is not empty
+    if not utilization_matrix.empty:
+        try:
+            sns.heatmap(utilization_matrix, cmap='YlGnBu', annot=True, fmt='.2f')
+            plt.title('Organizational Utilization Heatmap')
+            plt.xlabel('Organizational Levels')
+            plt.ylabel('Avg Daily Employees')
+            plt.xticks(rotation=45, ha='right')
+        except Exception as e:
+            print(f"Error creating heatmap: {e}")
     
     # 2. Allocation Compliance Distribution
     plt.subplot(2, 2, 2)
-    compliance_df = results['allocation_compliance']['detailed_compliance_analysis']
-    sns.scatterplot(
-        data=compliance_df, 
-        x='home_allocation_percent', 
-        y='badge_frequency', 
-        hue='compliance_score'
-    )
-    plt.title('Home Allocation vs Badge Frequency')
-    plt.xlabel('Home Allocation %')
-    plt.ylabel('Badge Frequency')
+    if 'detailed_compliance_analysis' in results['allocation_compliance']:
+        compliance_df = results['allocation_compliance']['detailed_compliance_analysis']
+        plt.scatter(
+            compliance_df['home_allocation_percent'], 
+            compliance_df['badge_frequency'], 
+            c=compliance_df['compliance_score'], 
+            cmap='viridis'
+        )
+        plt.colorbar(label='Compliance Score')
+        plt.title('Home Allocation vs Badge Frequency')
+        plt.xlabel('Home Allocation %')
+        plt.ylabel('Badge Frequency')
     
     # 3. Day of Week Utilization
     plt.subplot(2, 2, 3)
-    day_utilization = results['temporal_patterns']['day_of_week_utilization']
-    day_utilization.plot(kind='bar')
-    plt.title('Employee Utilization by Day of Week')
-    plt.xlabel('Day of Week')
-    plt.ylabel('Unique Employees')
-    plt.xticks(rotation=45)
+    if 'day_of_week_utilization' in results['temporal_patterns']:
+        day_utilization = results['temporal_patterns']['day_of_week_utilization']
+        day_utilization.plot(kind='bar')
+        plt.title('Employee Utilization by Day of Week')
+        plt.xlabel('Day of Week')
+        plt.ylabel('Unique Employees')
+        plt.xticks(rotation=45)
     
     # 4. Hire Period Utilization
     plt.subplot(2, 2, 4)
-    hire_utilization = results['temporal_patterns']['hire_period_utilization']
-    hire_utilization.plot(kind='pie', autopct='%1.1f%%')
-    plt.title('Employee Utilization by Tenure')
+    if 'hire_period_utilization' in results['temporal_patterns']:
+        hire_utilization = results['temporal_patterns']['hire_period_utilization']
+        hire_utilization.plot(kind='pie', autopct='%1.1f%%')
+        plt.title('Employee Utilization by Tenure')
     
     plt.tight_layout()
     plt.show()
@@ -187,40 +218,73 @@ def generate_advanced_utilization_report(results):
     Returns:
         str: Detailed markdown report
     """
-    report = f"""# Advanced Office Space Utilization Report
-
-## Organizational Utilization Insights
-{' '.join([f"- **{level}**: Avg Daily Employees = {results['organizational_utilization'][level]['avg_daily_employees'].mean():.2f}" for level in results['organizational_utilization']])}
-
-## Home Allocation Compliance
-- **Correlation between Home Allocation and Badge Frequency**: {results['allocation_compliance']['overall_compliance_correlation']:.4f}
-- **Compliance Score Distribution**:
-  - Mean: {results['allocation_compliance']['compliance_distribution']['mean']:.2f}
-  - Std Dev: {results['allocation_compliance']['compliance_distribution']['std']:.2f}
-
-## Temporal Utilization Patterns
-### Day of Week Utilization
-{results['temporal_patterns']['day_of_week_utilization']}
-
-### Utilization by Tenure
-{results['temporal_patterns']['hire_period_utilization']}
-
-## Predictive Utilization Model
-- **Model R² Score**: {results['predictive_model']['model_r2_score']:.4f}
-- **Model Mean Squared Error**: {results['predictive_model']['model_mse']:.4f}
-
-### Top Influential Features for Office Utilization
-{pd.Series(results['predictive_model']['feature_importances']).nlargest(5)}
-
-## Key Recommendations
-1. Align home allocation percentages with actual badge frequencies
-2. Focus on understanding utilization variations across different organizational levels
-3. Develop targeted strategies for improving office space usage
-"""
+    report = "# Advanced Office Space Utilization Report\n\n"
+    
+    # Organizational Utilization
+    report += "## Organizational Utilization Insights\n"
+    for level, utilization in results['organizational_utilization'].items():
+        report += f"### {level}\n"
+        report += f"- Average Daily Employees: {utilization['avg_daily_employees'].mean():.2f}\n"
+        report += f"- Peak Employees: {utilization['peak_employees'].mean():.2f}\n"
+        report += f"- Minimum Employees: {utilization['min_employees'].mean():.2f}\n\n"
+    
+    # Allocation Compliance
+    if results['allocation_compliance']:
+        report += "## Home Allocation Compliance\n"
+        report += f"- Correlation: {results['allocation_compliance'].get('overall_compliance_correlation', 'N/A')}\n"
+        
+        compliance_dist = results['allocation_compliance'].get('compliance_distribution', {})
+        for stat, value in compliance_dist.items():
+            report += f"- {stat.capitalize()}: {value:.2f}\n"
+        report += "\n"
+    
+    # Temporal Patterns
+    if results['temporal_patterns']:
+        report += "## Temporal Utilization Patterns\n"
+        
+        day_util = results['temporal_patterns'].get('day_of_week_utilization', {})
+        report += "### Day of Week Utilization\n"
+        for day, utilization in day_util.items():
+            report += f"- {day}: {utilization}\n"
+        
+        hire_util = results['temporal_patterns'].get('hire_period_utilization', {})
+        report += "\n### Utilization by Tenure\n"
+        for period, utilization in hire_util.items():
+            report += f"- {period}: {utilization}\n"
+        report += "\n"
+    
+    # Predictive Model
+    if results['predictive_model']:
+        report += "## Predictive Utilization Model\n"
+        report += f"- R² Score: {results['predictive_model'].get('model_r2_score', 'N/A')}\n"
+        report += f"- Mean Squared Error: {results['predictive_model'].get('model_mse', 'N/A')}\n"
+        
+        feature_importance = results['predictive_model'].get('feature_importances', {})
+        report += "\n### Feature Importances\n"
+        for feature, importance in sorted(feature_importance.items(), key=lambda x: abs(x[1]), reverse=True)[:5]:
+            report += f"- {feature}: {importance:.4f}\n"
+    
+    report += "\n## Key Recommendations\n"
+    report += "1. Analyze organizational-level utilization patterns\n"
+    report += "2. Review home allocation compliance\n"
+    report += "3. Investigate temporal utilization trends\n"
+    report += "4. Use predictive model insights for space planning\n"
+    
     return report
 
-# Example usage (placeholder)
-# results = advanced_office_utilization_analysis(badge_df)
-# visualize_advanced_analysis(results)
-# report = generate_advanced_utilization_report(results)
-# print(report)
+# Main execution
+try:
+    # Run the analysis
+    results = advanced_office_utilization_analysis(badge_df)
+    
+    # Generate visualizations
+    visualize_advanced_analysis(results)
+    
+    # Generate and print the report
+    report = generate_advanced_utilization_report(results)
+    print(report)
+except Exception as e:
+    print(f"An error occurred during analysis: {e}")
+    # Provide more detailed error tracking
+    import traceback
+    traceback.print_exc()
