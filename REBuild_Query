@@ -1,40 +1,67 @@
-Ok now I have the following query: 
-SELECT 
-    TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00') || TO_CHAR(EXTRACT(YEAR FROM calendar_date), '9999') AS Month_Year,
-    facility_code,
-    AVG(ttl_seats) AS average_seats,
-    AVG(CAD_RENTABLE_SF) AS average_rsf  -- Replace AVG with MIN or MAX as needed
-FROM 
-    HRDW.REAL_ESTATE.REAL_ESTATE_BUILD
-WHERE 
-    facility_code = '0055' 
-    AND status_description = 'Active'
-GROUP BY 
-    TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00'), 
-    EXTRACT(YEAR FROM calendar_date), 
-    facility_code
-ORDER BY 
-    Month_Year;
+SELECT
+  b.date,
+  b.employee_number,
+  b.office_number,
+  l.location_code,
+  o.cost_center_code,
+  pw.work_location_1_code,
+  g.grade_equivalent,
+  j.job_family,
+  j.segment_description,
+  j.management_level,
+  j.segment,
+  o.level_1,
+  o.level_2,
+  o.level_3,
+  o.level_4,
+  l.office_scale,
+  l.location_status,
+  pa.current_days_of_placement,
+  pa.hire_date,
+  pw.home_allocation_percent
+FROM
+  HRDW.REAL_ESTATE.badge_fact b
+JOIN
+   HRDW.EMPLOYEE_ORG.PERSON_FACT  pf on pf.person_fact_key = b.person_fact_key
+JOIN
+  HRDW.EMPLOYEE_ORG.LOCATION l ON pf.location_key = l.location_key
+JOIN
+  HRDW.EMPLOYEE_ORG.ORGANIZATION o ON o.org_key = pf.org_key 
+JOIN
+  HRDW.EMPLOYEE_ORG.PERSON_WORK_ARRANGEMENTS pw ON pw.work_arrangements_key = pf.work_arrangements_key
+JOIN
+  HRDW.EMPLOYEE_ORG.PERSON_INFO pi ON pi.person_info_key = pf.person_info_key
+JOIN
+HRDW.EMPLOYEE_ORG.GRADE g ON g.grade_key = pf.grade_key
+JOIN
+HRDW.EMPLOYEE_ORG.JOB j ON j.job_key = pf.job_key
+JOIN
+HRDW.EMPLOYEE_ORG.PERSON_ASSIGNMENT pa ON pa.assignment_key = pf.assignment_key
+
+WHERE
+  b.date = '2024-09-05'
+  AND b.office_number = '0055'
+AND pf.active_ind = 1
 
 
-I want to add in a new column "hybrid" which is a count of hybrid employees.  A little more info about this table is that not only does it have multiple date values per month but it has many rows per individual date.  The table has a column cost_center which are organizational breakdowns within a facility_code for each date.  Each cost_center has a breakdown of how many hybrid employees report to that facility_code for that date.  I need to capture one date within each month and take the sum of the hybrid employees for that individual date within that month to get an accurate count of employees for that facility_code for that date.
 
-
+Real_Estate_Build query:
 
 WITH MonthlyHybridEmployees AS (
-    -- Subquery to select one date per month with the highest or most representative hybrid employee count
+    -- Subquery to select one date per month with the highest or most representative employee counts
     SELECT 
         TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00') || TO_CHAR(EXTRACT(YEAR FROM calendar_date), '9999') AS Month_Year,
         facility_code,
         calendar_date,
-        SUM(hybrid_employees) AS total_hybrid_employees,
+        SUM(hybrid) AS total_hybrid_employees,
+        SUM(TTL) AS total_employees,  -- Add FT WFH aggregation
         ROW_NUMBER() OVER (
             PARTITION BY 
                 EXTRACT(YEAR FROM calendar_date), 
                 EXTRACT(MONTH FROM calendar_date), 
                 facility_code 
             ORDER BY 
-                SUM(hybrid_employees) DESC,  -- Choose the date with the highest hybrid employee count
+                SUM(hybrid) DESC,  -- Choose the date with the highest hybrid employee count
                 calendar_date
         ) AS month_rank
     FROM 
@@ -48,11 +75,12 @@ WITH MonthlyHybridEmployees AS (
 )
 
 SELECT 
-    TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00') || TO_CHAR(EXTRACT(YEAR FROM calendar_date), '9999') AS Month_Year,
-    facility_code,
-    AVG(ttl_seats) AS average_seats,
-    AVG(CAD_RENTABLE_SF) AS average_rsf,
-    MAX(total_hybrid_employees) AS hybrid_employees
+    TO_CHAR(EXTRACT(MONTH FROM re.calendar_date), 'FM00') || TO_CHAR(EXTRACT(YEAR FROM re.calendar_date), '9999') AS Month_Year,
+    re.facility_code,
+    AVG(re.ttl_seats) AS average_seats,
+    AVG(re.CAD_RENTABLE_SF) AS average_rsf,
+    MAX(mhe.total_hybrid_employees) AS hybrid_employees,
+    MAX(mhe.total_employees) AS ft_employees  -- Include FT WFH employees
 FROM 
     HRDW.REAL_ESTATE.REAL_ESTATE_BUILD re
 JOIN 
@@ -65,8 +93,8 @@ WHERE
     re.facility_code = '0055' 
     AND re.status_description = 'Active'
 GROUP BY 
-    TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00'), 
-    EXTRACT(YEAR FROM calendar_date), 
+    TO_CHAR(EXTRACT(MONTH FROM re.calendar_date), 'FM00'), 
+    EXTRACT(YEAR FROM re.calendar_date), 
     re.facility_code
 ORDER BY 
     Month_Year;
