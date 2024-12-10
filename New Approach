@@ -1,3 +1,70 @@
+results:
+
+Error in allocation compliance analysis: 'float' object has no attribute 'shape'
+Error in predictive utilization model: Input X contains NaN.
+LinearRegression does not accept missing values encoded as NaN natively. For supervised learning, you might want to consider sklearn.ensemble.HistGradientBoostingClassifier and Regressor which accept missing values encoded as NaNs natively. Alternatively, it is possible to preprocess the data, for instance by using an imputer transformer in a pipeline or drop samples with missing values. See https://scikit-learn.org/stable/modules/impute.html You can find a list of all estimators that handle NaN values at the following page: https://scikit-learn.org/stable/modules/impute.html#estimators-that-handle-nan-values
+
+# Advanced Office Space Utilization Report
+
+## Organizational Utilization Insights
+### LEVEL_1
+- Average Daily Employees: 46.09
+- Peak Employees: 109.50
+- Minimum Employees: 1.00
+
+### LEVEL_2
+- Average Daily Employees: 8.80
+- Peak Employees: 24.25
+- Minimum Employees: 1.00
+
+### LEVEL_3
+- Average Daily Employees: 3.41
+- Peak Employees: 10.17
+- Minimum Employees: 1.02
+
+### LEVEL_4
+- Average Daily Employees: 2.74
+- Peak Employees: 7.72
+- Minimum Employees: 1.03
+
+### JOB_FAMILY
+- Average Daily Employees: 6.72
+- Peak Employees: 17.28
+- Minimum Employees: 1.05
+
+### SEGMENT_DESCRIPTION
+- Average Daily Employees: 75.71
+- Peak Employees: 167.50
+- Minimum Employees: 1.00
+
+### MANAGEMENT_LEVEL
+- Average Daily Employees: 1.18
+- Peak Employees: 1.38
+- Minimum Employees: 1.00
+
+## Temporal Utilization Patterns
+### Day of Week Utilization
+- Monday: 2087
+- Tuesday: 3102
+- Wednesday: 3183
+- Thursday: 2894
+- Friday: 1631
+
+### Utilization by Tenure
+- 0-3 months: 132
+- 3-6 months: 67
+- 6-12 months: 108
+- 1+ years: 3594
+
+
+## Key Recommendations
+1. Analyze organizational-level utilization patterns
+2. Review home allocation compliance
+3. Investigate temporal utilization trends
+4. Use predictive model insights for space planning
+
+
+
 import pandas as pd
 import numpy as np
 import seaborn as sns
