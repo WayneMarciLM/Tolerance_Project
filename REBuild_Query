@@ -18,3 +18,55 @@ ORDER BY
 
 
 I want to add in a new column "hybrid" which is a count of hybrid employees.  A little more info about this table is that not only does it have multiple date values per month but it has many rows per individual date.  The table has a column cost_center which are organizational breakdowns within a facility_code for each date.  Each cost_center has a breakdown of how many hybrid employees report to that facility_code for that date.  I need to capture one date within each month and take the sum of the hybrid employees for that individual date within that month to get an accurate count of employees for that facility_code for that date.
+
+
+
+WITH MonthlyHybridEmployees AS (
+    -- Subquery to select one date per month with the highest or most representative hybrid employee count
+    SELECT 
+        TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00') || TO_CHAR(EXTRACT(YEAR FROM calendar_date), '9999') AS Month_Year,
+        facility_code,
+        calendar_date,
+        SUM(hybrid_employees) AS total_hybrid_employees,
+        ROW_NUMBER() OVER (
+            PARTITION BY 
+                EXTRACT(YEAR FROM calendar_date), 
+                EXTRACT(MONTH FROM calendar_date), 
+                facility_code 
+            ORDER BY 
+                SUM(hybrid_employees) DESC,  -- Choose the date with the highest hybrid employee count
+                calendar_date
+        ) AS month_rank
+    FROM 
+        HRDW.REAL_ESTATE.REAL_ESTATE_BUILD
+    WHERE 
+        facility_code = '0055' 
+        AND status_description = 'Active'
+    GROUP BY 
+        calendar_date,
+        facility_code
+)
+
+SELECT 
+    TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00') || TO_CHAR(EXTRACT(YEAR FROM calendar_date), '9999') AS Month_Year,
+    facility_code,
+    AVG(ttl_seats) AS average_seats,
+    AVG(CAD_RENTABLE_SF) AS average_rsf,
+    MAX(total_hybrid_employees) AS hybrid_employees
+FROM 
+    HRDW.REAL_ESTATE.REAL_ESTATE_BUILD re
+JOIN 
+    MonthlyHybridEmployees mhe
+ON 
+    re.facility_code = mhe.facility_code
+    AND re.calendar_date = mhe.calendar_date
+    AND mhe.month_rank = 1
+WHERE 
+    re.facility_code = '0055' 
+    AND re.status_description = 'Active'
+GROUP BY 
+    TO_CHAR(EXTRACT(MONTH FROM calendar_date), 'FM00'), 
+    EXTRACT(YEAR FROM calendar_date), 
+    re.facility_code
+ORDER BY 
+    Month_Year;
