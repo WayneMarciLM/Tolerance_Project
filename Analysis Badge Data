@@ -321,6 +321,188 @@ results = analyze_office_space_utilization(final_df_with_day_name)
 # Generate visualizations
 visualize_office_utilization(final_df_with_day_name, results)
 
+
+
+----------next approach---------------
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def advanced_seat_utilization_analysis(badge_df, interactive=True):
+    """
+    Advanced seat utilization analysis with multiple insights and interactive features.
+    
+    Args:
+        badge_df (pd.DataFrame): Detailed badge entry dataframe
+        interactive (bool): Enable interactive mode with user prompts
+    
+    Returns:
+        dict: Comprehensive analysis results
+    """
+    # Ensure correct date parsing
+    badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    
+    def interactive_filter_menu(badge_df):
+        """
+        Provide an interactive filtering interface for the dataframe
+        """
+        print("\n--- Interactive Filtering Options ---")
+        print("1. Filter by Job Family")
+        print("2. Filter by Management Level")
+        print("3. Filter by Segment")
+        print("4. Filter by Grade Equivalent")
+        print("5. No Additional Filtering")
+        
+        choice = input("Select a filtering option (1-5): ")
+        
+        if choice == '1':
+            job_families = badge_df['JOB_FAMILY'].unique()
+            print("Available Job Families:", ", ".join(job_families))
+            selected_family = input("Enter Job Family: ")
+            return badge_df[badge_df['JOB_FAMILY'] == selected_family]
+        
+        elif choice == '2':
+            mgmt_levels = badge_df['MANAGEMENT_LEVEL'].unique()
+            print("Available Management Levels:", ", ".join(mgmt_levels))
+            selected_level = input("Enter Management Level: ")
+            return badge_df[badge_df['MANAGEMENT_LEVEL'] == selected_level]
+        
+        elif choice == '3':
+            segments = badge_df['SEGMENT'].unique()
+            print("Available Segments:", ", ".join(segments))
+            selected_segment = input("Enter Segment: ")
+            return badge_df[badge_df['SEGMENT'] == selected_segment]
+        
+        elif choice == '4':
+            grades = badge_df['GRADE_EQUIVALENT'].unique()
+            print("Available Grades:", ", ".join(map(str, sorted(grades))))
+            selected_grade = input("Enter Grade Equivalent: ")
+            return badge_df[badge_df['GRADE_EQUIVALENT'] == int(selected_grade)]
+        
+        return badge_df
+
+    def home_allocation_analysis(filtered_df):
+        """
+        Analyze seat utilization based on home allocation percentage
+        """
+        # Group by home allocation percentage ranges
+        filtered_df['allocation_group'] = pd.cut(
+            filtered_df['HOME_ALLOCATION_PERCENT'], 
+            bins=[0, 25, 50, 75, 100], 
+            labels=['0-25%', '26-50%', '51-75%', '76-100%']
+        )
+        
+        allocation_utilization = filtered_df.groupby('allocation_group')['EMPLOYEE_NUMBER'].nunique()
+        return dict(allocation_utilization)
+
+    def organizational_insights(filtered_df):
+        """
+        Generate insights across different organizational dimensions
+        """
+        insights = {
+            'job_family_breakdown': filtered_df['JOB_FAMILY'].value_counts(),
+            'segment_breakdown': filtered_df['SEGMENT'].value_counts(),
+            'management_level_breakdown': filtered_df['MANAGEMENT_LEVEL'].value_counts(),
+            'avg_days_in_role': filtered_df['CURRENT_DAYS_OF_PLACEMENT'].mean()
+        }
+        return insights
+
+    def spatial_distribution(filtered_df):
+        """
+        Analyze spatial distribution of office usage
+        """
+        location_usage = filtered_df.groupby('WORK_LOCATION_1_CODE')['EMPLOYEE_NUMBER'].nunique()
+        return location_usage.sort_values(ascending=False)
+
+    def seasonal_trend_analysis(filtered_df):
+        """
+        Detect seasonal trends in office attendance
+        """
+        monthly_trend = filtered_df.groupby(filtered_df['DATE'].dt.to_period('M'))['EMPLOYEE_NUMBER'].nunique()
+        return monthly_trend
+
+    def visualize_insights(insights):
+        """
+        Create visualizations for key insights
+        """
+        plt.figure(figsize=(15, 10))
+        
+        # Job Family Breakdown
+        plt.subplot(2, 2, 1)
+        insights['job_family_breakdown'].plot(kind='pie', autopct='%1.1f%%')
+        plt.title('Job Family Distribution')
+        
+        # Segment Breakdown
+        plt.subplot(2, 2, 2)
+        insights['segment_breakdown'].plot(kind='bar')
+        plt.title('Segment Breakdown')
+        plt.xticks(rotation=45)
+        
+        # Management Level Distribution
+        plt.subplot(2, 2, 3)
+        insights['management_level_breakdown'].plot(kind='bar')
+        plt.title('Management Level Distribution')
+        plt.xticks(rotation=45)
+        
+        plt.tight_layout()
+        plt.show()
+
+    # Interactive mode
+    if interactive:
+        print("\n--- Advanced Seat Utilization Analysis ---")
+        filtered_df = interactive_filter_menu(badge_df)
+    else:
+        filtered_df = badge_df
+
+    # Perform comprehensive analysis
+    home_allocation_results = home_allocation_analysis(filtered_df)
+    org_insights = organizational_insights(filtered_df)
+    location_distribution = spatial_distribution(filtered_df)
+    seasonal_trends = seasonal_trend_analysis(filtered_df)
+
+    # Optional visualization
+    visualize_option = input("Would you like to visualize organizational insights? (y/n): ")
+    if visualize_option.lower() == 'y':
+        visualize_insights(org_insights)
+
+    # Combine and return results
+    analysis_results = {
+        'home_allocation_utilization': home_allocation_results,
+        'organizational_insights': org_insights,
+        'spatial_distribution': dict(location_distribution),
+        'seasonal_trends': dict(seasonal_trends)
+    }
+    
+    return analysis_results
+
+# Example usage
+if __name__ == "__main__":
+    try:
+        # Assuming badge_df is already loaded
+        results = advanced_seat_utilization_analysis(badge_df)
+        
+        # Print key results
+        print("\n--- Analysis Results ---")
+        print("\nHome Allocation Utilization:")
+        for group, count in results['home_allocation_utilization'].items():
+            print(f"{group}: {count} employees")
+        
+        print("\nTop Work Locations:")
+        top_locations = dict(sorted(results['spatial_distribution'].items(), key=lambda x: x[1], reverse=True)[:5])
+        for location, count in top_locations.items():
+            print(f"{location}: {count} employees")
+        
+        print("\nSeasonal Trends:")
+        for period, count in results['seasonal_trends'].items():
+            print(f"{period}: {count} employees")
+    
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
+
 # Generate and print the report
 report = generate_space_optimization_report(results)
 print(report)
