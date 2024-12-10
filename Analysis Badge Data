@@ -1,0 +1,327 @@
+List of columns in badge_df:
+
+['DATE', 'EMPLOYEE_NUMBER', 'OFFICE_NUMBER', 'LOCATION_CODE', 'COST_CENTER_CODE', 'WORK_LOCATION_1_CODE', 'GRADE_EQUIVALENT', 'JOB_FAMILY', 'SEGMENT_DESCRIPTION', 'MANAGEMENT_LEVEL', 'SEGMENT', 'LEVEL_1', 'LEVEL_2', 'LEVEL_3', 'LEVEL_4', 'OFFICE_SCALE', 'LOCATION_STATUS', 'CURRENT_DAYS_OF_PLACEMENT', 'HIRE_DATE', 'HOME_ALLOCATION_PERCENT']
+
+Example:
+
+# Import necessary packages
+import os
+import pandas as pd
+import numpy as np
+import cryptocode
+import requests
+
+# Visualization
+import matplotlib.pyplot as plt
+import seaborn as sns
+plt.rcParams["figure.figsize"] = (16,6)
+plotsize = (16, 5)
+
+from pyspark.dbutils import DBUtils
+from pyspark.sql import SparkSession
+from datetime import datetime, date, time, timedelta
+from databricks.sdk.runtime import *
+dbutils.fs.cp("dbfs:/FileStore/Snowflake_Databricks_Utility.py", "file:/tmp/Snowflake_Databricks_Utility.py", True)
+import sys
+sys.path.append("/tmp")
+from Snowflake_Databricks_Utility import SnowFlakeUtility
+import warnings
+pd.set_option("display.max_columns", None)
+warnings.filterwarnings("ignore")
+
+# Replace the USER_ROLE(Role name should be in CAPS) with the role you have access to.
+myinstance = SnowFlakeUtility(user_role="HR_REAL_ESTATE")
+myinstance.execute()
+
+sfOptions = myinstance.sfOptions
+
+# Fetch Office Data from server
+office_query = '''
+SELECT
+  DISTINCT facility_code,
+  TTL_SEATS AS NUMBER_OF_SEATS
+FROM
+  HRDW.REAL_ESTATE.real_estate_build
+WHERE
+  DATE_TRUNC('MONTH', CURRENT_DATE) - INTERVAL '1 MONTH' = DATE_TRUNC('DAY', calendar_date) AND
+  status_description = 'Active' AND
+  FACILITY_CODE = '0055'
+'''
+
+print('thinking...')
+office_spdf = spark.read.format("snowflake") \
+    .options(**sfOptions) \
+    .option("query", office_query) \
+    .option("sfWarehouse", "BIZ_REPORTING_WH") \
+    .load()
+
+office_df = office_spdf.toPandas()
+print('Shape of Office Data is', office_df.shape)
+
+# Fetch Date Data from server
+date_query = '''
+SELECT
+  calendar_date,
+  day_name
+FROM
+  HRDW.EMPLOYEE_ORG.CALENDAR
+WHERE
+ YEAR_ACTUAL >= '2023'
+'''
+
+print('thinking...')
+date_spdf = spark.read.format("snowflake") \
+    .options(**sfOptions) \
+    .option("query", date_query) \
+    .option("sfWarehouse", "BIZ_REPORTING_WH") \
+    .load()
+
+date_df = date_spdf.toPandas()
+print('Shape of Date Data is', date_df.shape)
+
+# Fetch Badge Data from server
+badge_query = '''
+SELECT
+  date,
+  employee_number,
+  office_number
+FROM
+  HRDW.REAL_ESTATE.badge_fact
+WHERE
+  date >= '2023-09-05' AND
+  office_number = '0055'
+'''
+
+print('thinking...')
+badge_spdf = spark.read.format("snowflake") \
+    .options(**sfOptions) \
+    .option("query", badge_query) \
+    .option("sfWarehouse", "BIZ_REPORTING_WH") \
+    .load()
+
+badge_df = badge_spdf.toPandas()
+print('Shape of Badge Data is', badge_df.shape)
+
+# Create the count_for_swipes column
+badge_df['count_for_swipes'] = badge_df.apply(lambda row: f"{row['DATE']}_{row['OFFICE_NUMBER']}_{row['EMPLOYEE_NUMBER']}", axis=1)
+
+# Group by DATE and OFFICE_NUMBER and count distinct occurrences of count_for_swipes
+daily_swipe_counts = badge_df.groupby(['DATE', 'OFFICE_NUMBER'])['count_for_swipes'].nunique().reset_index(name='distinct_swipe_count')
+
+# Merge daily_swipe_counts with office_df on OFFICE_NUMBER and FACILITY_CODE
+merged_df = daily_swipe_counts.merge(
+    office_df[['FACILITY_CODE', 'NUMBER_OF_SEATS']],  # Select only the columns needed from office_df
+    left_on='OFFICE_NUMBER',
+    right_on='FACILITY_CODE',
+    how='left'  # Use 'left' to keep all records from daily_swipe_counts
+)
+
+# Select only the required columns
+final_df = merged_df[['DATE', 'OFFICE_NUMBER', 'distinct_swipe_count', 'NUMBER_OF_SEATS']]
+
+# Ensure the actual column name is correctly referenced
+final_df.columns = final_df.columns.str.upper()  # If unsure, convert all to uppercase to align with CALENDAR_DATE
+
+# Ensure both DATE columns are of the datetime type for accurate merging
+final_df['DATE'] = pd.to_datetime(final_df['DATE'])  # Confirm 'DATE' is correct in final_df
+date_df['CALENDAR_DATE'] = pd.to_datetime(date_df['CALENDAR_DATE'])
+
+# Merge final_df with date_df to include the DAY_NAME
+final_df_with_day_name = final_df.merge(
+    date_df[['CALENDAR_DATE', 'DAY_NAME']],
+    left_on='DATE',
+    right_on='CALENDAR_DATE',
+    how='left'
+)
+
+# Drop the redundant CALENDAR_DATE column
+final_df_with_day_name.drop(columns=['CALENDAR_DATE'], inplace=True)
+
+# Strip whitespace from the 'DAY_NAME' column
+final_df_with_day_name['DAY_NAME'] = final_df_with_day_name['DAY_NAME'].str.strip()
+
+# Filter out weekends and define weekdays_df
+weekdays_df = final_df_with_day_name[~final_df_with_day_name['DAY_NAME'].isin(['Saturday', 'Sunday'])]
+
+# Check if weekdays_df is correctly defined
+print("Unique days in weekdays_df after filtering:")
+print(weekdays_df['DAY_NAME'].unique())  # Should only show ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+
+def analyze_office_space_utilization(final_df_with_day_name):
+    """
+    Comprehensive analysis of office space utilization
+    
+    Args:
+        final_df_with_day_name (pd.DataFrame): DataFrame with occupancy data
+    
+    Returns:
+        dict: Comprehensive analysis results
+    """
+    # Ensure numeric types
+    weekdays_df['DISTINCT_SWIPE_COUNT'] = pd.to_numeric(weekdays_df['DISTINCT_SWIPE_COUNT'], errors='coerce')
+    weekdays_df['NUMBER_OF_SEATS'] = pd.to_numeric(weekdays_df['NUMBER_OF_SEATS'], errors='coerce')
+    
+    # Analysis Metrics
+    results = {
+        'total_days_tracked': 0,
+        'average_daily_occupancy': 0,
+        'average_seat_utilization': 0,
+        'optimal_seat_count': 0,
+        'potential_seat_reduction': 0,
+        'overcapacity_days_count': 0,
+        'overcapacity_percentage': 0,
+        'peak_usage': 0,
+        'peak_usage_percentage': 0,
+        'usage_standard_deviation': 0,
+        'coefficient_of_variation': 0
+    }
+    
+    # 1. Overall Occupancy Analysis
+    results['total_days_tracked'] = len(weekdays_df)
+    results['average_daily_occupancy'] = weekdays_df['DISTINCT_SWIPE_COUNT'].mean()
+    
+    # Safely handle seat count
+    try:
+        total_seats = weekdays_df['NUMBER_OF_SEATS'].iloc[0]
+        if pd.notna(total_seats) and total_seats != 0:
+            results['average_seat_utilization'] = (results['average_daily_occupancy'] / total_seats) * 100
+            
+            # 3. Capacity Planning
+            target_utilization = 0.80  # 80% target
+            results['optimal_seat_count'] = int(results['average_daily_occupancy'] / target_utilization) if results['average_daily_occupancy'] > 0 else 0
+            results['potential_seat_reduction'] = max(0, total_seats - results['optimal_seat_count'])
+            
+            # 4. Overcapacity Analysis
+            overcapacity_days = weekdays_df[weekdays_df['DISTINCT_SWIPE_COUNT'] > total_seats]
+            results['overcapacity_days_count'] = len(overcapacity_days)
+            results['overcapacity_percentage'] = len(overcapacity_days) / len(weekdays_df) * 100 if len(weekdays_df) > 0 else 0
+            
+            # 5. Peak Usage Analysis
+            results['peak_usage'] = weekdays_df['DISTINCT_SWIPE_COUNT'].max()
+            results['peak_usage_percentage'] = results['peak_usage'] / total_seats * 100
+            
+            # 6. Variability in Usage
+            results['usage_standard_deviation'] = weekdays_df['DISTINCT_SWIPE_COUNT'].std()
+            results['coefficient_of_variation'] = results['usage_standard_deviation'] / results['average_daily_occupancy'] * 100 if results['average_daily_occupancy'] > 0 else 0
+    except Exception as e:
+        print(f"Error in seat count analysis: {e}")
+    
+    # 2. Day of Week Analysis
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+    day_of_week_analysis = weekdays_df.groupby('DAY_NAME')['DISTINCT_SWIPE_COUNT'].agg(['mean', 'count']).reset_index()
+    
+    # Ensure all weekdays are represented, even if they have no data
+    day_df = pd.DataFrame({'DAY_NAME': day_order})
+    day_of_week_analysis = day_df.merge(day_of_week_analysis, on='DAY_NAME', how='left').fillna(0)
+    
+    # Safely calculate utilization percentage
+    if pd.notna(total_seats) and total_seats != 0:
+        day_of_week_analysis['utilization_percentage'] = day_of_week_analysis['mean'] / total_seats * 100
+    else:
+        day_of_week_analysis['utilization_percentage'] = 0
+    
+    results['day_of_week_analysis'] = day_of_week_analysis
+    
+    return results
+
+def visualize_office_utilization(final_df_with_day_name, results):
+    """
+    Create visualizations for office space utilization
+    
+    Args:
+        final_df_with_day_name (pd.DataFrame): DataFrame with occupancy data
+        results (dict): Analysis results from analyze_office_space_utilization
+    """
+    # Filter out weekends
+    weekdays_df = final_df_with_day_name[~final_df_with_day_name['DAY_NAME'].isin(['Saturday', 'Sunday'])]
+    
+    plt.figure(figsize=(15, 10))
+    
+    # Day of Week Utilization
+    plt.subplot(2, 2, 1)
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+    day_analysis = results['day_of_week_analysis'].set_index('DAY_NAME')
+    day_analysis = day_analysis.reindex(day_order)
+    
+    day_analysis['utilization_percentage'].plot(kind='bar')
+    plt.title('Daily Utilization Percentage')
+    plt.xlabel('Day of Week')
+    plt.ylabel('Utilization %')
+    plt.xticks(rotation=45)
+    
+    # Daily Occupancy Distribution
+    plt.subplot(2, 2, 2)
+    weekdays_df['DISTINCT_SWIPE_COUNT'].hist(bins=20)
+    plt.title('Distribution of Daily Occupancy')
+    plt.xlabel('Number of Occupants')
+    plt.ylabel('Frequency')
+    
+    # Box Plot of Occupancy by Day
+    plt.subplot(2, 2, 3)
+    sns.boxplot(x='DAY_NAME', y='DISTINCT_SWIPE_COUNT', 
+                data=weekdays_df, 
+                order=day_order)
+    plt.title('Occupancy Distribution by Day')
+    plt.xlabel('Day of Week')
+    plt.ylabel('Number of Occupants')
+    plt.xticks(rotation=45)
+    
+    # Seat Capacity vs Actual Usage
+    plt.subplot(2, 2, 4)
+    plt.scatter(weekdays_df['NUMBER_OF_SEATS'], weekdays_df['DISTINCT_SWIPE_COUNT'])
+    plt.title('Seat Capacity vs Actual Usage')
+    plt.xlabel('Total Seats')
+    plt.ylabel('Actual Occupancy')
+    
+    plt.tight_layout()
+    plt.show()
+
+def generate_space_optimization_report(results):
+    """
+    Generate a detailed report on space optimization opportunities
+    
+    Args:
+        results (dict): Analysis results from analyze_office_space_utilization
+    
+    Returns:
+        str: Detailed markdown report
+    """
+    report = f"""# Office Space Utilization Report
+
+## Key Metrics
+- **Total Days Tracked**: {results['total_days_tracked']}
+- **Average Daily Occupancy**: {results['average_daily_occupancy']:.2f}
+- **Average Seat Utilization**: {results['average_seat_utilization']:.2f}%
+
+## Capacity Planning
+- **Current Total Seats**: {results['optimal_seat_count']}
+- **Potential Seat Reduction**: {results['potential_seat_reduction']}
+- **Recommended Optimal Seat Count**: {results['optimal_seat_count']}
+
+## Overcapacity Analysis
+- **Overcapacity Days**: {results['overcapacity_days_count']}
+- **Overcapacity Percentage**: {results['overcapacity_percentage']:.2f}%
+
+## Usage Variability
+- **Peak Usage**: {results['peak_usage']}
+- **Peak Usage Percentage**: {results['peak_usage_percentage']:.2f}%
+- **Usage Standard Deviation**: {results['usage_standard_deviation']:.2f}
+- **Coefficient of Variation**: {results['coefficient_of_variation']:.2f}%
+
+## Recommendations
+1. Consider reducing total seats by {results['potential_seat_reduction']} to optimize space utilization
+2. Focus on days with lower utilization for potential space reallocation
+3. Investigate reasons for overcapacity on {results['overcapacity_days_count']} days
+"""
+    return report
+
+# Run the analysis
+results = analyze_office_space_utilization(final_df_with_day_name)
+
+# Generate visualizations
+visualize_office_utilization(final_df_with_day_name, results)
+
+# Generate and print the report
+report = generate_space_optimization_report(results)
+print(report)
+
