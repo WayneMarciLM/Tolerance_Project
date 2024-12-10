@@ -181,3 +181,122 @@ except Exception as e:
     print(f"An error occurred during analysis: {e}")
     import traceback
     traceback.print_exc()
+
+
+
+---------------------------
+
+
+import pandas as pd
+import numpy as np
+
+def seat_utilization_analysis(badge_df):
+    """
+    Analyze badge usage to determine seat requirements based on percentiles.
+    
+    Args:
+        badge_df (pd.DataFrame): Detailed badge entry dataframe
+    
+    Returns:
+        dict: Analysis results regarding seat requirements and usage.
+    """
+    # Ensure correct date parsing
+    badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    
+    # 1. Calculate daily usage counts
+    daily_usage = badge_df.groupby('DATE')['EMPLOYEE_NUMBER'].nunique()
+    
+    # 2. Determine required seats based on percentiles
+    percentiles = [95, 90, 85, 80, 75]
+    seat_requirements = {}
+    
+    for percentile in percentiles:
+        # Calculate the seat requirement based on the specified percentile
+        required_seats = np.percentile(daily_usage, percentile)
+        over_capacity_days = (daily_usage > required_seats).sum()
+        
+        seat_requirements[percentile] = {
+            'required_seats': int(required_seats),
+            'days_over_capacity': over_capacity_days
+        }
+    
+    # 3. Analyze trends over time
+    def analyze_trends(daily_usage):
+        trends = {
+            'average_daily_usage': daily_usage.mean(),
+            'max_daily_usage': daily_usage.max(),
+            'min_daily_usage': daily_usage.min(),
+            'std_daily_usage': daily_usage.std()
+        }
+        return trends
+
+    trends = analyze_trends(daily_usage)
+    
+    # 4. Determine utilization by day of week
+    badge_df['day_of_week'] = badge_df['DATE'].dt.day_name()
+    week_day_utilization = badge_df.groupby('day_of_week')['EMPLOYEE_NUMBER'].nunique().reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
+
+    # 5. Identify high usage days (top 5 days)
+    top_usage_days = daily_usage.nlargest(5)
+
+    # Combine all results into a dictionary
+    analysis_results = {
+        'seat_requirements': seat_requirements,
+        'trends': trends,
+        'week_day_utilization': week_day_utilization,
+        'top_usage_days': top_usage_days
+    }
+    
+    return analysis_results
+
+# Main execution
+try:
+    # Assuming badge_df is already defined and contains the necessary data
+    results = seat_utilization_analysis(badge_df)
+    
+    # Display results
+    print("Seat Utilization Analysis Results:")
+    print(results)
+except Exception as e:
+    print(f"An error occurred during analysis: {e}")
+    import traceback
+    traceback.print_exc()
+
+
+---------------------------------
+
+# Main execution
+if __name__ == "__main__":
+    try:
+        # Assuming badge_df is already defined and contains the necessary data
+        input_seat_count = int(input("Enter the current number of seats: "))
+        vibrancy_percent = float(input("Enter the desired vibrancy percentage (0-100): "))
+        
+        results = scenario_analysis(badge_df, input_seat_count, vibrancy_percent)
+        
+        # Display results
+        print("Scenario Analysis Results:")
+        print(f"Input Seat Count: {results['input_seat_count']}")
+        print(f"Total Days Over Capacity: {results['over_capacity_days']}")
+        
+        # Only show the count of over capacity days instead of the dates
+        if results['over_capacity_days'] > 0:
+            print(f"Dates Over Capacity: {len(results['over_capacity_dates'])} days total")
+        else:
+            print("Dates Over Capacity: None")
+        
+        print(f"Total Days Feeling Empty: {results['empty_days']}")
+        
+        # Only show the count of empty days instead of the dates
+        if results['empty_days'] > 0:
+            print(f"Dates Feeling Empty: {len(results['empty_dates'])} days total")
+        else:
+            print("Dates Feeling Empty: None")
+        
+        # Required seats analysis
+        for percentile, data in results['required_seats'].items():
+            print(f"{percentile}th Percentile - Required Seats: {data['required_seats']}, Days Over Capacity: {data['days_over_capacity']}")
+    except Exception as e:
+        print(f"An error occurred during analysis: {e}")
+        import traceback
+        traceback.print_exc()
