@@ -1,0 +1,49 @@
+WITH DailyHybridCounts AS (
+    SELECT 
+        facility_code,
+        TO_CHAR(calendar_date, 'YYYY-MM') AS Month_Year,  -- Format to year-month for easier aggregation
+        SUM(hybrid) AS total_hybrid  -- Replace with the correct column name for hybrid employees
+    FROM 
+        HRDW.REAL_ESTATE.REAL_ESTATE_BUILD
+    WHERE 
+        facility_code = '0055' 
+        AND status_description = 'Active'
+    GROUP BY 
+        facility_code,
+        TO_CHAR(calendar_date, 'YYYY-MM')  -- Grouping by year-month
+),
+
+MonthlyAggregates AS (
+    SELECT 
+        Month_Year,
+        facility_code,
+        SUM(total_hybrid) AS monthly_hybrid  -- Sum hybrid employees across all days in a month
+    FROM 
+        DailyHybridCounts
+    GROUP BY 
+        Month_Year,
+        facility_code
+)
+
+SELECT 
+    m.Month_Year,
+    m.facility_code,
+    AVG(r.ttl_seats) AS average_seats,
+    AVG(r.CAD_RENTABLE_SF) AS average_rsf,
+    m.monthly_hybrid
+FROM 
+    MonthlyAggregates m
+JOIN 
+    HRDW.REAL_ESTATE.REAL_ESTATE_BUILD r
+ON 
+    m.facility_code = r.facility_code 
+    AND TO_CHAR(r.calendar_date, 'YYYY-MM') = m.Month_Year
+WHERE 
+    r.facility_code = '0055' 
+    AND r.status_description = 'Active'
+GROUP BY 
+    m.Month_Year,
+    m.facility_code,
+    m.monthly_hybrid
+ORDER BY 
+    m.Month_Year;
