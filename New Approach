@@ -73,8 +73,9 @@ import scipy.stats as stats
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 
 def advanced_office_utilization_analysis(badge_df):
     """
@@ -91,8 +92,7 @@ def advanced_office_utilization_analysis(badge_df):
     badge_df['HIRE_DATE'] = pd.to_datetime(badge_df['HIRE_DATE'])
     
     # 1. Daily Utilization by Organizational Dimensions
-    org_levels = ['LEVEL_1', 'LEVEL_2', 'LEVEL_3', 'LEVEL_4', 
-                  'JOB_FAMILY', 'SEGMENT_DESCRIPTION', 'MANAGEMENT_LEVEL']
+    org_levels = ['LEVEL_1', 'LEVEL_2', 'LEVEL_3', 'LEVEL_4']
     
     org_utilization = {}
     for level in org_levels:
@@ -110,13 +110,16 @@ def advanced_office_utilization_analysis(badge_df):
     # 2. Allocation Compliance Analysis
     def allocation_compliance_analysis(df):
         try:
+            # Handle potential missing values
+            df_clean = df.dropna(subset=['EMPLOYEE_NUMBER', 'HOME_ALLOCATION_PERCENT'])
+            
             # Calculate badge frequency per employee
-            employee_badge_freq = df.groupby('EMPLOYEE_NUMBER')['DATE'].count()
+            employee_badge_freq = df_clean.groupby('EMPLOYEE_NUMBER')['DATE'].count()
             
             # Link with home allocation percentage
             allocation_compliance = pd.DataFrame({
                 'badge_frequency': employee_badge_freq,
-                'home_allocation_percent': df.groupby('EMPLOYEE_NUMBER')['HOME_ALLOCATION_PERCENT'].first()
+                'home_allocation_percent': df_clean.groupby('EMPLOYEE_NUMBER')['HOME_ALLOCATION_PERCENT'].first()
             })
             
             # Calculate correlation and compliance score
@@ -185,16 +188,22 @@ def advanced_office_utilization_analysis(badge_df):
             ], axis=1)
             y = employee_features['badge_frequency']
             
+            # Create a pipeline to handle missing values and scaling
+            pipeline = Pipeline([
+                ('imputer', SimpleImputer(strategy='median')),
+                ('scaler', StandardScaler()),
+                ('regressor', LinearRegression())
+            ])
+            
             # Split and model
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
             
-            model = LinearRegression()
-            model.fit(X_train, y_train)
+            pipeline.fit(X_train, y_train)
             
             return {
-                'model_r2_score': r2_score(y_test, model.predict(X_test)),
-                'model_mse': mean_squared_error(y_test, model.predict(X_test)),
-                'feature_importances': dict(zip(X.columns, model.coef_))
+                'model_r2_score': r2_score(y_test, pipeline.predict(X_test)),
+                'model_mse': mean_squared_error(y_test, pipeline.predict(X_test)),
+                'feature_importances': dict(zip(X.columns, pipeline.named_steps['regressor'].coef_))
             }
         except Exception as e:
             print(f"Error in predictive utilization model: {e}")
@@ -217,9 +226,9 @@ def visualize_advanced_analysis(results):
     Args:
         results (dict): Analysis results from advanced_office_utilization_analysis
     """
-    plt.figure(figsize=(20, 15))
+    plt.figure(figsize=(15, 10))
     
-    # 1. Organizational Utilization Heatmap
+    # 1. Organizational Utilization Heatmap (Only LEVEL_1-4)
     plt.subplot(2, 2, 1)
     org_levels = list(results['organizational_utilization'].keys())
     
@@ -233,7 +242,7 @@ def visualize_advanced_analysis(results):
     if not utilization_matrix.empty:
         try:
             sns.heatmap(utilization_matrix, cmap='YlGnBu', annot=True, fmt='.2f')
-            plt.title('Organizational Utilization Heatmap')
+            plt.title('Organizational Level Utilization')
             plt.xlabel('Organizational Levels')
             plt.ylabel('Avg Daily Employees')
             plt.xticks(rotation=45, ha='right')
@@ -352,6 +361,5 @@ try:
     print(report)
 except Exception as e:
     print(f"An error occurred during analysis: {e}")
-    # Provide more detailed error tracking
     import traceback
     traceback.print_exc()
