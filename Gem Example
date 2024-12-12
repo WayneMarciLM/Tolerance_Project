@@ -1,0 +1,121 @@
+import pandas as pd
+import numpy as np
+
+def seat_utilization_analysis(badge_df):
+    """Analyze badge usage to determine seat requirements."""
+    badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    daily_usage = badge_df.groupby('DATE')['EMPLOYEE_NUMBER'].nunique()
+    percentiles = [95, 90, 85, 80, 75]
+    seat_requirements = {}
+    for percentile in percentiles:
+        required_seats = np.percentile(daily_usage, percentile)
+        over_capacity_days = (daily_usage > required_seats).sum()
+        seat_requirements[percentile] = {
+            'required_seats': int(required_seats),
+            'days_over_capacity': over_capacity_days
+        }
+    trends = {
+        'average_daily_usage': daily_usage.mean(),
+        'max_daily_usage': daily_usage.max(),
+        'min_daily_usage': daily_usage.min(),
+        'std_daily_usage': daily_usage.std()
+    }
+    badge_df['day_of_week'] = badge_df['DATE'].dt.day_name()
+    week_day_utilization = badge_df.groupby('day_of_week')['EMPLOYEE_NUMBER'].nunique().reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
+    top_usage_days = daily_usage.nlargest(5)
+    analysis_results = {
+        'seat_requirements': seat_requirements,
+        'trends': trends,
+        'week_day_utilization': week_day_utilization,
+        'top_usage_days': top_usage_days
+    }
+    return analysis_results
+
+def scenario_analysis(badge_df, input_seat_count, vibrancy_percent):
+    """Analyzes seat capacity scenarios based on user input."""
+    badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    daily_usage = badge_df.groupby('DATE')['EMPLOYEE_NUMBER'].nunique()
+    
+    # Calculate vibrancy threshold
+    vibrancy_threshold = input_seat_count * (vibrancy_percent / 100)
+
+    over_capacity_days = (daily_usage > input_seat_count).sum()
+    over_capacity_dates = daily_usage[daily_usage > input_seat_count].index.tolist()
+    empty_days = (daily_usage < vibrancy_threshold).sum()
+    empty_dates = daily_usage[daily_usage < vibrancy_threshold].index.tolist()
+
+    percentiles = [95, 90, 85, 80, 75]
+    seat_requirements = {}
+    for percentile in percentiles:
+        required_seats = np.percentile(daily_usage, percentile)
+        over_capacity_days_percentile = (daily_usage > required_seats).sum()
+        seat_requirements[percentile] = {
+            'required_seats': int(required_seats),
+            'days_over_capacity': over_capacity_days_percentile
+        }
+
+    return {
+        'input_seat_count': input_seat_count,
+        'over_capacity_days': over_capacity_days,
+        'over_capacity_dates': over_capacity_dates,
+        'empty_days': empty_days,
+        'empty_dates': empty_dates,
+        'required_seats': seat_requirements
+    }
+
+def employee_type_analysis(badge_df, employee_type_column):
+    """Analyzes seat utilization by employee type."""
+    if employee_type_column not in badge_df.columns:
+        raise ValueError(f"Column '{employee_type_column}' not found in DataFrame.")
+    badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    daily_usage_by_type = badge_df.groupby(['DATE', employee_type_column])['EMPLOYEE_NUMBER'].nunique().unstack(fill_value=0)
+    return daily_usage_by_type
+
+def home_allocation_analysis(badge_df, home_allocation_column):
+    """Analyzes seat utilization based on home allocation percentage."""
+    if home_allocation_column not in badge_df.columns:
+        raise ValueError(f"Column '{home_allocation_column}' not found in DataFrame.")
+    badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    # Group by date and home allocation range
+    badge_df['HOME_ALLOCATION_RANGE'] = pd.cut(badge_df[home_allocation_column], bins=[0, 25, 50, 75, 100], labels=['0-25%', '26-50%', '51-75%', '76-100%'], right=False)
+    daily_usage_by_allocation = badge_df.groupby(['DATE', 'HOME_ALLOCATION_RANGE'])['EMPLOYEE_NUMBER'].nunique().unstack(fill_value=0)
+    return daily_usage_by_allocation
+
+
+if __name__ == "__main__":
+    # Example usage (replace with your actual data loading)
+    try:
+        badge_df = pd.read_csv("badge_data.csv") # Example CSV load
+        badge_df['DATE'] = pd.to_datetime(badge_df['DATE'])
+    except FileNotFoundError:
+        print("Error: badge_data.csv not found. Please provide the correct path.")
+        exit()
+    except pd.errors.ParserError:
+        print("Error: Could not parse badge_data.csv. Please ensure it is a valid CSV file.")
+        exit()
+
+    try:
+        results = seat_utilization_analysis(badge_df)
+        # ... (print results as before)
+
+        input_seat_count = int(input("Enter the current number of seats: "))
+        vibrancy_percent = float(input("Enter the desired vibrancy percentage (0-100): "))
+
+        scenario_results = scenario_analysis(badge_df, input_seat_count, vibrancy_percent)
+        # ... (print scenario results as before)
+
+        # New features
+        employee_type_col = input("Enter the employee type column name (e.g., JOB_FAMILY): ")
+        employee_type_usage = employee_type_analysis(badge_df, employee_type_col)
+        print("\nDaily Usage by Employee Type:")
+        print(employee_type_usage)
+
+        home_allocation_col = 'HOME_ALLOCATION_PERCENT'
+        home_allocation_usage = home_allocation_analysis(badge_df, home_allocation_col)
+        print("\nDaily Usage by Home Allocation Percentage:")
+        print(home_allocation_usage)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
